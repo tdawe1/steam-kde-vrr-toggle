@@ -139,3 +139,4 @@ Open a terminal and run this command to see recent logs from the script:
 ```bash
 journalctl --user -u "vrr_toggle.sh" --since "5 minutes ago"
 ```
+[![License: 0BSD](https://img.shields.io/badge/License-0BSD-blue.svg)](https://opensource.org/licenses/0BSD)
