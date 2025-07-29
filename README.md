@@ -19,6 +19,8 @@ This solution uses a two-script system to reliably manage display settings witho
 
 2.  **`vrr-toggle.sh`**: The main worker script that does all the heavy lifting. It communicates directly with the KDE KScreen daemon using the `kscreen-doctor` utility and the correct `vrrpolicy` command to turn VRR off and on.
 
+> **Important Disclaimer:** This script controls the VRR setting *at the Operating System level*. It will not work if your monitor's internal firmware (the On-Screen Display, or OSD) is set to override the OS preference. If your monitor's "Adaptive-Sync" or "FreeSync" setting is permanently enabled via its physical buttons, this script cannot change that.
+
 ## Prerequisites
 
 Your system needs the following command-line tools.
@@ -86,9 +88,9 @@ case "$1" in
 esac
 ```
 
-**File 2: Steam Wrapper Script: `steam-vrr-wrapper.sh`**
+**File 2: Steam Wrapper Script: `steam_vrr_wrapper.sh`**
 
-Save this code as `~/scripts/steam-vrr-wrapper.sh`. This is the script Steam calls.
+Save this code as `~/scripts/steam_vrr_wrapper.sh`. This is the script Steam calls.
 
 ```bash
 #!/bin/bash
@@ -96,7 +98,7 @@ Save this code as `~/scripts/steam-vrr-wrapper.sh`. This is the script Steam cal
 # Steam Wrapper Script
 
 # --- USER CONFIGURATION ---
-MAIN_SCRIPT_PATH="/home/YOUR_USER/scripts/vrr-toggle.sh"
+MAIN_SCRIPT_PATH="/home/YOUR_USER/scripts/vrr_toggle.sh"
 
 systemd-run \
     --user --no-block \
@@ -118,12 +120,12 @@ systemd-run \
 **2. Make Scripts Executable**
 
 ```bash
-chmod +x ~/scripts/vrr-toggle.sh && chmod +x ~/scripts/steam-vrr-wrapper.sh
+chmod +x ~/scripts/vrr_toggle.sh && chmod +x ~/scripts/steam-vrr-wrapper.sh
 ```
 
 **3. Configure the Wrapper**
 
-Open the `steam-vrr-wrapper.sh` file with a text editor and **replace `YOUR_USER`** with your actual Linux username.
+Open the `steam_vrr_wrapper.sh` file with a text editor and **replace `YOUR_USER`** with your actual Linux username.
 ```bash
 kate ~/scripts/steam-vrr-wrapper.sh
 ```
@@ -149,14 +151,22 @@ kate ~/scripts/steam-vrr-wrapper.sh
     /home/YOUR_USER/scripts/steam-vrr-wrapper.sh %command%
     ```
 
-5.  Close the Properties window. That's it! When you play the game, your screen should flicker as the VRR mode is turned off, and flicker again when it's restored on exit.
+5.  Close the Properties window. That's it! If your monitor respects OS-level VRR commands, your screen should flicker as the mode is turned off and on.
 
 ## Troubleshooting
 
-The script's actions are logged to the systemd journal. If the script doesn't seem to work, you can check its log to see what happened.
+### Checking the Log
 
-Open a terminal and run this command to see recent logs from the script:
+The script's actions are logged to the systemd journal. If you suspect an issue, you can check its log. Open a terminal and run this command to see recent logs from the script:
 
 ```bash
 journalctl --user -u "vrr-toggle.sh" --since "5 minutes ago"
 ```
+If the log shows the `EXECUTING` and `RESTORING` messages without any errors, the script is working correctly from a software perspective.
+
+### No Screen Flicker / Setting Doesn't Change
+
+If the journal shows the script is working but you see no physical change on your screen, it is almost certain that your **monitor's internal firmware is overriding the command from the OS.**
+
+*   **The Cause:** Many monitors have a primary "Adaptive-Sync" or "FreeSync" setting in their On-Screen Display (OSD) menu (the menu you access with the physical buttons on the monitor). If this is set to "On", it may ignore any requests from the operating system to turn it off.
+*   **The Solution:** Use the physical buttons on your monitor to open its OSD menu, navigate to the "Gaming" or "System" section, and ensure the master Adaptive-Sync setting is set to a state that allows OS control, which may be labeled "Off" or "Standard". The ideal scenario is when toggling the setting in KDE's System Settings causes a screen flicker, which confirms the OS has control.
