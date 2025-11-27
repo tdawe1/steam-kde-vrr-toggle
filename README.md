@@ -72,18 +72,40 @@ Save this code as `~/scripts/vrr-toggle.sh`. This script contains the core logic
 KS_CMD="/usr/bin/kscreen-doctor"
 JQ_CMD="/usr/bin/jq"
 
+STATE_FILE="/tmp/vrr_original_states.json"
+
 # --- Main Logic ---
 case "$1" in
     off)
+        echo "[VRR_TOGGLE] Disabling VRR..."
+        $KS_CMD -j > "$STATE_FILE"
+
         while read -r output_name; do
-            $KS_CMD "output.${output_name}.vrrpolicy.off"
-        done < <($KS_CMD -j | $JQ_CMD -r '.outputs[] | select(.enabled==true) | .name')
+            echo "[VRR_TOGGLE] EXECUTING: $KS_CMD output.${output_name}.vrrpolicy.never"
+            $KS_CMD "output.${output_name}.vrrpolicy.never"
+        done < <($JQ_CMD -r '.outputs[] | select(.enabled==true) | .name' < "$STATE_FILE")
         ;;
 
     restore)
-        while read -r output_name; do
-            $KS_CMD "output.${output_name}.vrrpolicy.auto"
-        done < <($KS_CMD -j | $JQ_CMD -r '.outputs[] | select(.enabled==true) | .name')
+        if [[ -f "$STATE_FILE" ]]; then
+            echo "[VRR_TOGGLE] Restoring VRR..."
+            while read -r output_name original_vrr_policy; do
+                if [[ "$original_vrr_policy" != "null" ]]; then
+                    # Map integer values to strings if necessary
+                    case "$original_vrr_policy" in
+                        0) policy_str="never" ;;
+                        1) policy_str="always" ;;
+                        2) policy_str="automatic" ;;
+                        *) policy_str="$original_vrr_policy" ;; # Fallback for existing string values
+                    esac
+
+                    echo "[VRR_TOGGLE] RESTORING: $KS_CMD output.${output_name}.vrrpolicy.${policy_str}"
+                    $KS_CMD "output.${output_name}.vrrpolicy.${policy_str}"
+                fi
+            done < <($JQ_CMD -r '.outputs[] | select(.enabled==true) | "\(.name) \(.vrrpolicy)"' < "$STATE_FILE")
+
+            rm "$STATE_FILE"
+        fi
         ;;
 esac
 ```
@@ -99,6 +121,19 @@ Save this code as `~/scripts/steam_vrr_wrapper.sh`. This is the script Steam cal
 
 # --- USER CONFIGURATION ---
 MAIN_SCRIPT_PATH="/home/YOUR_USER/scripts/vrr_toggle.sh"
+
+# Fallback/User Configuration: Set the full path to your script if it's not in /usr/bin
+if [ ! -f "$MAIN_SCRIPT_PATH" ]; then
+    if [ -f "/usr/bin/vrr_toggle.sh" ]; then
+        MAIN_SCRIPT_PATH="/usr/bin/vrr_toggle.sh"
+    fi
+fi
+
+if [ ! -f "$MAIN_SCRIPT_PATH" ]; then
+    echo "Error: vrr_toggle.sh not found at $MAIN_SCRIPT_PATH"
+    echo "Please configure MAIN_SCRIPT_PATH in steam_vrr_wrapper.sh"
+    exit 1
+fi
 
 systemd-run \
     --user --no-block \
