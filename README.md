@@ -56,145 +56,29 @@ First, create a directory for your scripts if you don't have one:
 mkdir -p ~/scripts
 ```
 
-Now, create the two script files below.
+**2. Download or Create Script Files**
+
+Download the scripts directly from the repository or copy their contents.
 
 **File 1: Main Worker Script: `vrr-toggle.sh`**
 
-Save this code as `~/scripts/vrr-toggle.sh`. This script contains the core logic.
-
-```bash
-#!/bin/bash
-#
-# VRR Toggle Script 
-# Toggles VRR between OFF and a sensible default (Automatic).
-
-# --- Configuration: Set the full path to your executables ---
-KS_CMD="/usr/bin/kscreen-doctor"
-JQ_CMD="/usr/bin/jq"
-
-STATE_FILE="/tmp/vrr_original_states.json"
-
-# --- Main Logic ---
-case "$1" in
-    off)
-        echo "[VRR_TOGGLE] Disabling VRR..."
-
-        # Capture current state to a temp file first
-        TEMP_STATE=$(mktemp)
-        if ! $KS_CMD -j > "$TEMP_STATE"; then
-            echo "[VRR_TOGGLE] Error: Failed to query kscreen-doctor state."
-            rm -f "$TEMP_STATE"
-            exit 1
-        fi
-
-        # Validate JSON content
-        if ! $JQ_CMD . "$TEMP_STATE" >/dev/null 2>&1; then
-            echo "[VRR_TOGGLE] Error: Invalid JSON output from kscreen-doctor."
-            rm -f "$TEMP_STATE"
-            exit 1
-        fi
-
-        # Move valid state to persistent location
-        mv "$TEMP_STATE" "$STATE_FILE"
-
-        while read -r output_name; do
-            echo "[VRR_TOGGLE] EXECUTING: $KS_CMD output.${output_name}.vrrpolicy.never"
-            if ! $KS_CMD "output.${output_name}.vrrpolicy.never"; then
-                echo "[VRR_TOGGLE] Error: Failed to disable VRR for $output_name"
-                exit 1
-            fi
-        done < <($JQ_CMD -r '.outputs[] | select(.enabled==true) | .name' < "$STATE_FILE")
-        ;;
-
-    restore)
-        if [[ -f "$STATE_FILE" ]]; then
-            echo "[VRR_TOGGLE] Restoring VRR..."
-            RESTORE_SUCCESS=true
-
-            while read -r output_name original_vrr_policy; do
-                if [[ "$original_vrr_policy" != "null" ]]; then
-                    # Map integer values to strings if necessary
-                    case "$original_vrr_policy" in
-                        0) policy_str="never" ;;
-                        1) policy_str="always" ;;
-                        2) policy_str="automatic" ;;
-                        *) policy_str="$original_vrr_policy" ;; # Fallback for existing string values
-                    esac
-
-                    echo "[VRR_TOGGLE] RESTORING: $KS_CMD output.${output_name}.vrrpolicy.${policy_str}"
-                    if ! $KS_CMD "output.${output_name}.vrrpolicy.${policy_str}"; then
-                        echo "[VRR_TOGGLE] Error: Failed to restore VRR for $output_name"
-                        RESTORE_SUCCESS=false
-                    fi
-                fi
-            done < <($JQ_CMD -r '.outputs[] | select(.enabled==true) | "\(.name) \(.vrrpolicy)"' < "$STATE_FILE")
-
-            if [ "$RESTORE_SUCCESS" = true ]; then
-                rm "$STATE_FILE"
-                echo "[VRR_TOGGLE] Restoration complete."
-            else
-                echo "[VRR_TOGGLE] Warning: Restoration failed for some outputs. State file preserved."
-                exit 1
-            fi
-        else
-            echo "[VRR_TOGGLE] No state file found. Nothing to restore."
-        fi
-        ;;
-esac
-```
+Download `vrr-toggle.sh` and save it to `~/scripts/vrr-toggle.sh`.
+Alternatively, copy the content from [vrr-toggle.sh](./vrr_toggle.sh) in this repository.
 
 **File 2: Steam Wrapper Script: `steam_vrr_wrapper.sh`**
 
-Save this code as `~/scripts/steam_vrr_wrapper.sh`. This is the script Steam calls.
+Download `steam_vrr_wrapper.sh` and save it to `~/scripts/steam_vrr_wrapper.sh`.
+Alternatively, copy the content from [steam_vrr_wrapper.sh](./steam_vrr_wrapper.sh) in this repository.
 
-```bash
-#!/bin/bash
-#
-# Steam Wrapper Script
-
-# --- USER CONFIGURATION ---
-MAIN_SCRIPT_PATH="/usr/bin/vrr_toggle.sh"
-
-# Fallback: Check user script path if system script is missing
-if [ ! -f "$MAIN_SCRIPT_PATH" ]; then
-    # Adjust this path if your script is located elsewhere
-    if [ -f "$HOME/scripts/vrr_toggle.sh" ]; then
-        MAIN_SCRIPT_PATH="$HOME/scripts/vrr_toggle.sh"
-    fi
-fi
-
-if [ ! -f "$MAIN_SCRIPT_PATH" ]; then
-    echo "Error: vrr_toggle.sh not found at $MAIN_SCRIPT_PATH"
-    echo "Please configure MAIN_SCRIPT_PATH in steam_vrr_wrapper.sh"
-    exit 1
-fi
-
-systemd-run \
-    --user --no-block \
-    --setenv=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
-    --setenv=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-    --setenv=DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-    "$MAIN_SCRIPT_PATH" off
-
-"$@"
-
-systemd-run \
-    --user --no-block \
-    --setenv=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
-    --setenv=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-    --setenv=DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-    "$MAIN_SCRIPT_PATH" restore
-```
-
-**2. Make Scripts Executable**
+**3. Make Scripts Executable**
 
 ```bash
 chmod +x ~/scripts/vrr_toggle.sh && chmod +x ~/scripts/steam-vrr-wrapper.sh
 ```
 
-**3. Configure the Wrapper**
+**4. Configure the Wrapper**
 
-Open the `steam_vrr_wrapper.sh` file with a text editor and **replace `YOUR_USER`** with your actual Linux username.
+Open the `steam_vrr_wrapper.sh` file with a text editor and **replace `YOUR_USER`** with your actual Linux username (if you are not using the default `/usr/bin/` location).
 ```bash
 kate ~/scripts/steam-vrr-wrapper.sh
 ```
