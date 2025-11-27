@@ -56,76 +56,29 @@ First, create a directory for your scripts if you don't have one:
 mkdir -p ~/scripts
 ```
 
-Now, create the two script files below.
+**2. Download or Create Script Files**
+
+Download the scripts directly from the repository or copy their contents.
 
 **File 1: Main Worker Script: `vrr-toggle.sh`**
 
-Save this code as `~/scripts/vrr-toggle.sh`. This script contains the core logic.
-
-```bash
-#!/bin/bash
-#
-# VRR Toggle Script 
-# Toggles VRR between OFF and a sensible default (Automatic).
-
-# --- Configuration: Set the full path to your executables ---
-KS_CMD="/usr/bin/kscreen-doctor"
-JQ_CMD="/usr/bin/jq"
-
-# --- Main Logic ---
-case "$1" in
-    off)
-        while read -r output_name; do
-            $KS_CMD "output.${output_name}.vrrpolicy.off"
-        done < <($KS_CMD -j | $JQ_CMD -r '.outputs[] | select(.enabled==true) | .name')
-        ;;
-
-    restore)
-        while read -r output_name; do
-            $KS_CMD "output.${output_name}.vrrpolicy.auto"
-        done < <($KS_CMD -j | $JQ_CMD -r '.outputs[] | select(.enabled==true) | .name')
-        ;;
-esac
-```
+Download `vrr-toggle.sh` and save it to `~/scripts/vrr-toggle.sh`.
+Alternatively, copy the content from [vrr-toggle.sh](./vrr_toggle.sh) in this repository.
 
 **File 2: Steam Wrapper Script: `steam_vrr_wrapper.sh`**
 
-Save this code as `~/scripts/steam_vrr_wrapper.sh`. This is the script Steam calls.
+Download `steam_vrr_wrapper.sh` and save it to `~/scripts/steam_vrr_wrapper.sh`.
+Alternatively, copy the content from [steam_vrr_wrapper.sh](./steam_vrr_wrapper.sh) in this repository.
 
-```bash
-#!/bin/bash
-#
-# Steam Wrapper Script
-
-# --- USER CONFIGURATION ---
-MAIN_SCRIPT_PATH="/home/YOUR_USER/scripts/vrr_toggle.sh"
-
-systemd-run \
-    --user --no-block \
-    --setenv=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
-    --setenv=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-    --setenv=DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-    "$MAIN_SCRIPT_PATH" off
-
-"$@"
-
-systemd-run \
-    --user --no-block \
-    --setenv=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
-    --setenv=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-    --setenv=DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-    "$MAIN_SCRIPT_PATH" restore
-```
-
-**2. Make Scripts Executable**
+**3. Make Scripts Executable**
 
 ```bash
 chmod +x ~/scripts/vrr_toggle.sh && chmod +x ~/scripts/steam-vrr-wrapper.sh
 ```
 
-**3. Configure the Wrapper**
+**4. Configure the Wrapper**
 
-Open the `steam_vrr_wrapper.sh` file with a text editor and **replace `YOUR_USER`** with your actual Linux username.
+Open the `steam_vrr_wrapper.sh` file with a text editor and **replace `YOUR_USER`** with your actual Linux username (if you are not using the default `/usr/bin/` location).
 ```bash
 kate ~/scripts/steam-vrr-wrapper.sh
 ```
