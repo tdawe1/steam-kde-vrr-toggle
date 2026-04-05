@@ -48,7 +48,7 @@ disable_vrr() {
 	while IFS= read -r output_name; do
 		[[ -n "$output_name" ]] || continue
 		printf '[VRR_TOGGLE] Disabling VRR on %s\n' "$output_name"
-		"$KS_CMD" "output.${output_name}.vrrpolicy.off"
+		"$KS_CMD" "output.${output_name}.vrrpolicy.never"
 	done < <("$JQ_CMD" -r '.outputs[] | select(.enabled == true) | .name' <"$state_file")
 }
 
