@@ -2,7 +2,7 @@
 
 set -u
 
-MAIN_SCRIPT_PATH="${MAIN_SCRIPT_PATH:-/usr/bin/vrr_toggle.sh}"
+MAIN_SCRIPT_PATH="${MAIN_SCRIPT_PATH:-/usr/lib/steam-kde-vrr-toggle/vrr_toggle.sh}"
 SESSION_ID="steam-vrr-$$-${RANDOM}"
 RESTORE_NEEDED=0
 
