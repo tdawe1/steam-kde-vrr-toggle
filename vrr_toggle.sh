@@ -57,8 +57,15 @@ restore_vrr() {
 
 	while IFS= read -r output_name original_vrr_policy; do
 		[[ "$original_vrr_policy" != "null" ]] || continue
-		printf '[VRR_TOGGLE] Restoring %s to %s\n' "$output_name" "$original_vrr_policy"
-		"$KS_CMD" "output.${output_name}.vrrpolicy.${original_vrr_policy}"
+		local policy_str
+		case "$original_vrr_policy" in
+			0) policy_str="never" ;;
+			1) policy_str="always" ;;
+			2) policy_str="automatic" ;;
+			*) policy_str="$original_vrr_policy" ;;
+		esac
+		printf '[VRR_TOGGLE] Restoring %s to %s\n' "$output_name" "$policy_str"
+		"$KS_CMD" "output.${output_name}.vrrpolicy.${policy_str}"
 	done < <("$JQ_CMD" -r '.outputs[] | select(.enabled == true) | "\(.name) \(.vrrpolicy)"' <"$state_file")
 }
 
