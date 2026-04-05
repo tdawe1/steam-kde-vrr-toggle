@@ -3,123 +3,84 @@
 [![AUR version](https://img.shields.io/aur/version/steam-kde-vrr-toggle)](https://aur.archlinux.org/packages/steam-kde-vrr-toggle)
 [![License: 0BSD](https://img.shields.io/badge/License-0BSD-blue.svg)](https://opensource.org/licenses/0BSD)
 
-Automatically toggles VRR / Adaptive-Sync on a per-game basis in KDE Plasma (Wayland). Solves game flickering issues by disabling VRR for specific Steam games.
+Automatically disables VRR / Adaptive Sync for selected Steam games on KDE Plasma Wayland, then restores the previous display policy when the game exits.
 
----
+## What It Does
 
-## The Problem
+Some games behave poorly with VRR enabled. This project adds a Steam launch wrapper that:
 
-Some games, particularly those running through Proton on Linux, can experience issues like flickering, stuttering, or incorrect frame pacing when Variable Refresh Rate (VRR) is enabled. Manually toggling this setting in System Settings before and after playing is tedious. This project automates that process.
+1. Captures the current VRR policy for each enabled display.
+2. Disables VRR before the game starts.
+3. Restores the original VRR policy after the game exits.
 
-## The Solution
+The wrapper runs the worker script through `systemd-run --user` so the display change happens outside the Steam runtime sandbox.
 
-This solution uses a two-script system to reliably manage display settings without being affected by the Steam runtime sandbox:
+> Important: This only changes the OS-level VRR policy. If your monitor firmware forces Adaptive-Sync on, the scripts cannot override that setting.
 
-1.  **`steam-vrr-wrapper.sh`**: A minimal wrapper script placed in the Steam game's launch options. Its only job is to use `systemd-run` to call the main worker script, ensuring it executes in a clean, non-sandboxed user session with the correct environment.
+## Improvements In v1.0.2
 
-2.  **`vrr-toggle.sh`**: The main worker script that does all the heavy lifting. It communicates directly with the KDE KScreen daemon using the `kscreen-doctor` utility and the correct `vrrpolicy` command to turn VRR off and on.
+- Waits for VRR to be disabled before launching the game.
+- Supports overlapping wrapped game sessions without restoring VRR too early.
+- Cleans up stale session markers after interrupted launches.
+- Keeps the AUR and manual-install behavior aligned with the same script paths.
 
-> **Important Disclaimer:** This script controls the VRR setting *at the Operating System level*. It will not work if your monitor's internal firmware (the On-Screen Display, or OSD) is set to override the OS preference. If your monitor's "Adaptive-Sync" or "FreeSync" setting is permanently enabled via its physical buttons, this script cannot change that.
+## Requirements
 
-## Prerequisites
-
-Your system needs the following command-line tools.
--   `bash`
--   `kscreen-doctor` (Part of KDE Plasma)
--   `jq` (A lightweight JSON processor)
--   `systemd`
+- `bash`
+- `jq`
+- `kscreen-doctor`
+- `systemd-run`
+- `flock` from `util-linux`
 
 ## Installation
 
-### Method 1: Arch User Repository (AUR) - Recommended
+### Method 1: Arch User Repository (AUR)
 
-This is the easiest and recommended method for users on Arch Linux and its derivatives (like CachyOS, Manjaro, etc.). The AUR package handles all file placement and configuration automatically.
+Install the package with your preferred AUR helper:
 
-1.  Make sure you have an AUR helper like `yay` or `paru` installed.
-2.  Install the package from the AUR:
-    ```bash
-    yay -S steam-kde-vrr-toggle
-    ```
-3.  Skip to the [Usage](#usage) section.
+```bash
+yay -S steam-kde-vrr-toggle
+```
+
+The package installs:
+
+- `steam_vrr_wrapper.sh` to `/usr/bin/steam_vrr_wrapper.sh`
+- `vrr_toggle.sh` to `/usr/lib/steam-kde-vrr-toggle/vrr_toggle.sh`
 
 ### Method 2: Manual Installation
 
-<details>
-<summary>Click here for manual installation instructions</summary>
-
-If you are not on an Arch-based distro or prefer a manual setup, follow these steps.
-
-**1. Create the Scripts**
-
-First, create a directory for your scripts if you don't have one:
-```bash
-mkdir -p ~/scripts
-```
-
-**2. Download or Create Script Files**
-
-Download the scripts directly from the repository or copy their contents.
-
-**File 1: Main Worker Script: `vrr-toggle.sh`**
-
-Download `vrr-toggle.sh` and save it to `~/scripts/vrr-toggle.sh`.
-Alternatively, copy the content from [vrr-toggle.sh](./vrr_toggle.sh) in this repository.
-
-**File 2: Steam Wrapper Script: `steam_vrr_wrapper.sh`**
-
-Download `steam_vrr_wrapper.sh` and save it to `~/scripts/steam_vrr_wrapper.sh`.
-Alternatively, copy the content from [steam_vrr_wrapper.sh](./steam_vrr_wrapper.sh) in this repository.
-
-**3. Make Scripts Executable**
+Place both scripts somewhere permanent, then make them executable:
 
 ```bash
-chmod +x ~/scripts/vrr_toggle.sh && chmod +x ~/scripts/steam-vrr-wrapper.sh
+chmod +x /absolute/path/to/vrr_toggle.sh /absolute/path/to/steam_vrr_wrapper.sh
 ```
 
-**4. Configure the Wrapper**
-
-Open the `steam_vrr_wrapper.sh` file with a text editor and **replace `YOUR_USER`** with your actual Linux username (if you are not using the default `/usr/bin/` location).
-```bash
-kate ~/scripts/steam-vrr-wrapper.sh
-```
-
-</details>
+If you are not using the packaged path, point the wrapper at the worker script with `MAIN_SCRIPT_PATH`.
 
 ## Usage
 
-1.  In your Steam Library, right-click the game you want to manage.
-2.  Select **Properties...**.
-3.  In the **GENERAL** tab, find the **LAUNCH OPTIONS** text box.
-4.  Enter the command based on your installation method:
+In the Steam game's launch options, use one of these commands.
 
-    #### If installed from the AUR:
-    The scripts are in your system's PATH, so no full path is needed.
-    ```
-    steam-vrr-wrapper.sh %command%
-    ```
+### If installed from the AUR
 
-    #### If installed manually:
-    You must provide the full path to the wrapper script. Remember to replace `YOUR_USER`.
-    ```
-    /home/YOUR_USER/scripts/steam-vrr-wrapper.sh %command%
-    ```
+```bash
+steam_vrr_wrapper.sh %command%
+```
 
-5.  Close the Properties window. That's it! If your monitor respects OS-level VRR commands, your screen should flicker as the mode is turned off and on.
+### If installed manually
+
+```bash
+MAIN_SCRIPT_PATH="/absolute/path/to/vrr_toggle.sh" /absolute/path/to/steam_vrr_wrapper.sh %command%
+```
 
 ## Troubleshooting
 
-### Checking the Log
+If the wrapper cannot toggle VRR, it logs a warning and still launches the game.
 
-The script's actions are logged to the systemd journal. If you suspect an issue, you can check its log. Open a terminal and run this command to see recent logs from the script:
+To inspect recent worker logs:
 
 ```bash
-journalctl --user -u "vrr-toggle.sh" --since "5 minutes ago"
+journalctl --user --since "10 minutes ago" | grep "VRR_TOGGLE"
 ```
-If the log shows the `EXECUTING` and `RESTORING` messages without any errors, the script is working correctly from a software perspective.
 
-### No Screen Flicker / Setting Doesn't Change
-
-If the journal shows the script is working but you see no physical change on your screen, it is almost certain that your **monitor's internal firmware is overriding the command from the OS.**
-
-*   **The Cause:** Many monitors have a primary "Adaptive-Sync" or "FreeSync" setting in their On-Screen Display (OSD) menu (the menu you access with the physical buttons on the monitor). If this is set to "On", it may ignore any requests from the operating system to turn it off.
-*   **The Solution:** Use the physical buttons on your monitor to open its OSD menu, navigate to the "Gaming" or "System" section, and ensure the master Adaptive-Sync setting is set to a state that allows OS control, which may be labeled "Off" or "Standard". The ideal scenario is when toggling the setting in KDE's System Settings causes a screen flicker, which confirms the OS has control.
+If the scripts log successful changes but the monitor never flickers or updates, check the monitor OSD and make sure its Adaptive-Sync setting allows OS control.

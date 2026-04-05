@@ -1,40 +1,63 @@
 #!/bin/bash
 
-# Default path if installed via AUR/package
-MAIN_SCRIPT_PATH="/usr/bin/vrr_toggle.sh"
+set -u
 
-# If not found, try to look for it in local scripts or current path
-if [ ! -f "$MAIN_SCRIPT_PATH" ]; then
-    # Fallback/User Configuration: Set the full path to your script if it's not in /usr/bin
-    # MAIN_SCRIPT_PATH="/home/YOUR_USER/scripts/vrr_toggle.sh"
+MAIN_SCRIPT_PATH="${MAIN_SCRIPT_PATH:-/usr/lib/steam-kde-vrr-toggle/vrr_toggle.sh}"
+SESSION_ID="steam-vrr-$$-${RANDOM}"
+RESTORE_NEEDED=0
 
-    # Check if we can find it in the same directory as this wrapper?
-    # Or just fail if not configured.
-    if [ -f "$HOME/scripts/vrr_toggle.sh" ]; then
-        MAIN_SCRIPT_PATH="$HOME/scripts/vrr_toggle.sh"
-    fi
-fi
+log() {
+	printf '[STEAM_VRR_WRAPPER] %s\n' "$1" >&2
+}
 
-if [ ! -f "$MAIN_SCRIPT_PATH" ]; then
-    echo "Error: vrr_toggle.sh not found at $MAIN_SCRIPT_PATH"
-    echo "Please configure MAIN_SCRIPT_PATH in steam_vrr_wrapper.sh"
-    exit 1
-fi
+run_toggle() {
+	local action="$1"
 
-systemd-run \
-    --user \
-    --no-block \
-    --setenv=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
-    --setenv=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-    --setenv=DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-    "$MAIN_SCRIPT_PATH" off
+	systemd-run \
+		--user \
+		--wait \
+		--collect \
+		--quiet \
+		--setenv=STEAM_VRR_WRAPPER_PID="$$" \
+		--setenv=WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
+		--setenv=XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" \
+		--setenv=DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" \
+		"$MAIN_SCRIPT_PATH" "$action" "$SESSION_ID"
+}
 
-"$@"
+cleanup() {
+	local exit_status=$?
 
-systemd-run \
-    --user \
-    --no-block \
-    --setenv=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
-    --setenv=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-    --setenv=DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-    "$MAIN_SCRIPT_PATH" restore
+	trap - EXIT INT TERM
+
+	if ((RESTORE_NEEDED)); then
+		if ! run_toggle restore; then
+			log "Failed to restore VRR state"
+		fi
+	fi
+
+	exit "$exit_status"
+}
+
+main() {
+	if [[ $# -eq 0 ]]; then
+		log "No game command was provided"
+		exit 64
+	fi
+
+	if [[ ! -x "$MAIN_SCRIPT_PATH" ]]; then
+		log "Main script not found or not executable: $MAIN_SCRIPT_PATH"
+		exec "$@"
+	fi
+
+	if run_toggle off; then
+		RESTORE_NEEDED=1
+	else
+		log "Failed to disable VRR before launch; continuing without changes"
+	fi
+
+	trap cleanup EXIT INT TERM
+	"$@"
+}
+
+main "$@"

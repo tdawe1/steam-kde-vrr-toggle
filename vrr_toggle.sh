@@ -1,78 +1,129 @@
 #!/bin/bash
 
+set -euo pipefail
+
 KS_CMD="/usr/bin/kscreen-doctor"
 JQ_CMD="/usr/bin/jq"
+FLOCK_CMD="/usr/bin/flock"
 
-STATE_FILE="/tmp/vrr_original_states.json"
+STATE_ROOT="${XDG_RUNTIME_DIR:-/tmp}/steam-kde-vrr-toggle"
+LOCK_FILE="$STATE_ROOT/lock"
+SESSIONS_DIR="$STATE_ROOT/sessions"
+ORIGINAL_STATE_FILE="$STATE_ROOT/original-state.json"
 
+usage() {
+	printf 'Usage: %s {off|restore} SESSION_ID\n' "$0" >&2
+	exit 64
+}
 
-case "$1" in
-    off)
-        echo "[VRR_TOGGLE] Disabling VRR..."
+require_command() {
+	if [[ ! -x "$1" ]]; then
+		printf '[VRR_TOGGLE] Missing required executable: %s\n' "$1" >&2
+		exit 69
+	fi
+}
 
-        # Capture current state to a temp file first
-        TEMP_STATE=$(mktemp)
-        if ! $KS_CMD -j > "$TEMP_STATE"; then
-            echo "[VRR_TOGGLE] Error: Failed to query kscreen-doctor state."
-            rm -f "$TEMP_STATE"
-            exit 1
-        fi
+session_file() {
+	printf '%s/%s.state' "$SESSIONS_DIR" "$1"
+}
 
-        # Validate JSON content
-        if ! $JQ_CMD . "$TEMP_STATE" >/dev/null 2>&1; then
-            echo "[VRR_TOGGLE] Error: Invalid JSON output from kscreen-doctor."
-            rm -f "$TEMP_STATE"
-            exit 1
-        fi
+prune_stale_sessions() {
+	shopt -s nullglob
+	local session_files=("$SESSIONS_DIR"/*.state)
+	shopt -u nullglob
+	local session_file owner_pid
 
-        # Move valid state to persistent location
-        mv "$TEMP_STATE" "$STATE_FILE"
+	for session_file in "${session_files[@]}"; do
+		owner_pid="$(<"$session_file")"
 
-        while read -r output_name; do
-            echo "[VRR_TOGGLE] EXECUTING: $KS_CMD output.${output_name}.vrrpolicy.never"
-            if ! $KS_CMD "output.${output_name}.vrrpolicy.never"; then
-                echo "[VRR_TOGGLE] Error: Failed to disable VRR for $output_name"
-                # We continue to try other outputs, but exit with error at the end?
-                # Or exit immediately? The comment says "abort with a clear error".
-                # But we might have partially applied changes.
-                # For now, let's just log it. The wrapper calls this asynchronously anyway.
-                exit 1
-            fi
-        done < <($JQ_CMD -r '.outputs[] | select(.enabled==true) | .name' < "$STATE_FILE")
-        ;;
+		if [[ ! "$owner_pid" =~ ^[0-9]+$ ]] || ! kill -0 "$owner_pid" 2>/dev/null; then
+			rm -f "$session_file"
+		fi
+	done
+}
 
-    restore)
-        if [[ -f "$STATE_FILE" ]]; then
-            echo "[VRR_TOGGLE] Restoring VRR..."
-            RESTORE_SUCCESS=true
+disable_vrr() {
+	local state_file="$1"
 
-            while read -r output_name original_vrr_policy; do
-                if [[ "$original_vrr_policy" != "null" ]]; then
-                    # Map integer values to strings if necessary
-                    case "$original_vrr_policy" in
-                        0) policy_str="never" ;;
-                        1) policy_str="always" ;;
-                        2) policy_str="automatic" ;;
-                        *) policy_str="$original_vrr_policy" ;; # Fallback for existing string values
-                    esac
+	while IFS= read -r output_name; do
+		[[ -n "$output_name" ]] || continue
+		printf '[VRR_TOGGLE] Disabling VRR on %s\n' "$output_name"
+		"$KS_CMD" "output.${output_name}.vrrpolicy.never"
+	done < <("$JQ_CMD" -r '.outputs[] | select(.enabled == true) | .name' <"$state_file")
+}
 
-                    echo "[VRR_TOGGLE] RESTORING: $KS_CMD output.${output_name}.vrrpolicy.${policy_str}"
-                    if ! $KS_CMD "output.${output_name}.vrrpolicy.${policy_str}"; then
-                        echo "[VRR_TOGGLE] Error: Failed to restore VRR for $output_name"
-                        RESTORE_SUCCESS=false
-                    fi
-                fi
-            done < <($JQ_CMD -r '.outputs[] | select(.enabled==true) | "\(.name) \(.vrrpolicy)"' < "$STATE_FILE")
+restore_vrr() {
+	local state_file="$1"
 
-            if [ "$RESTORE_SUCCESS" = true ]; then
-                rm "$STATE_FILE"
-                echo "[VRR_TOGGLE] Restoration complete."
-            else
-                echo "[VRR_TOGGLE] Warning: Restoration failed for some outputs. State file preserved."
-                exit 1
-            fi
-        else
-            echo "[VRR_TOGGLE] No state file found. Nothing to restore."
-        fi
-        ;;
-esac
+	while IFS= read -r output_name original_vrr_policy; do
+		[[ "$original_vrr_policy" != "null" ]] || continue
+		local policy_str
+		case "$original_vrr_policy" in
+			0) policy_str="never" ;;
+			1) policy_str="always" ;;
+			2) policy_str="automatic" ;;
+			*) policy_str="$original_vrr_policy" ;;
+		esac
+		printf '[VRR_TOGGLE] Restoring %s to %s\n' "$output_name" "$policy_str"
+		"$KS_CMD" "output.${output_name}.vrrpolicy.${policy_str}"
+	done < <("$JQ_CMD" -r '.outputs[] | select(.enabled == true) | "\(.name) \(.vrrpolicy)"' <"$state_file")
+}
+
+has_active_sessions() {
+	shopt -s nullglob
+	local session_files=("$SESSIONS_DIR"/*.state)
+	shopt -u nullglob
+	((${#session_files[@]} > 0))
+}
+
+main() {
+	local action="${1:-}"
+	local session_id="${2:-}"
+
+	[[ -n "$action" && -n "$session_id" ]] || usage
+	[[ "$session_id" =~ ^[A-Za-z0-9._-]+$ ]] || {
+		printf '[VRR_TOGGLE] Invalid session id: %s\n' "$session_id" >&2
+		exit 64
+	}
+
+	require_command "$KS_CMD"
+	require_command "$JQ_CMD"
+	require_command "$FLOCK_CMD"
+
+	mkdir -p "$SESSIONS_DIR"
+	exec 9>"$LOCK_FILE"
+	"$FLOCK_CMD" 9
+	prune_stale_sessions
+
+	local current_session_file
+	current_session_file="$(session_file "$session_id")"
+
+	case "$action" in
+	off)
+		if [[ ! -f "$ORIGINAL_STATE_FILE" ]]; then
+			local pending_state_file
+			pending_state_file="$STATE_ROOT/original-state.json.$$.tmp"
+
+			printf '[VRR_TOGGLE] Capturing current VRR state\n'
+			"$KS_CMD" -j >"$pending_state_file"
+			disable_vrr "$pending_state_file"
+			mv "$pending_state_file" "$ORIGINAL_STATE_FILE"
+		fi
+
+		printf '%s\n' "${STEAM_VRR_WRAPPER_PID:-}" >"$current_session_file"
+		;;
+	restore)
+		rm -f "$current_session_file"
+
+		if [[ -f "$ORIGINAL_STATE_FILE" ]] && ! has_active_sessions; then
+			restore_vrr "$ORIGINAL_STATE_FILE"
+			rm -f "$ORIGINAL_STATE_FILE"
+		fi
+		;;
+	*)
+		usage
+		;;
+	esac
+}
+
+main "$@"
